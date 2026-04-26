@@ -24,6 +24,8 @@ type contextKey string
 
 const claimsContextKey contextKey = "claims"
 
+const attachmentMultipartMemory = 64 << 20
+
 type Server struct {
 	svc    *service.Service
 	mux    *http.ServeMux
@@ -1053,7 +1055,18 @@ func (s *Server) handleCreateAttachment(w http.ResponseWriter, r *http.Request) 
 		writeError(w, err)
 		return
 	}
-	if err := r.ParseMultipartForm(64 << 20); err != nil {
+	if maxUploadSizeBytes := s.svc.MaxUploadSizeBytes(); maxUploadSizeBytes > 0 {
+		r.Body = http.MaxBytesReader(w, r.Body, maxUploadSizeBytes)
+	}
+	if err := r.ParseMultipartForm(attachmentMultipartMemory); err != nil {
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
+			writeJSON(w, http.StatusRequestEntityTooLarge, map[string]any{
+				"code":    1,
+				"message": "request body too large",
+			})
+			return
+		}
 		writeError(w, err)
 		return
 	}
@@ -1156,7 +1169,11 @@ func (s *Server) handlePreviewAttachment(w http.ResponseWriter, r *http.Request)
 		writeError(w, err)
 		return
 	}
-	path := s.svc.AttachmentAbsolutePath(item.RelativePath)
+	path, err := s.svc.AttachmentAbsolutePath(item.RelativePath)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
 	w.Header().Set("Content-Type", fallbackContentType(item.MimeType, item.FileExt))
 	http.ServeFile(w, r, path)
 }
@@ -1172,7 +1189,11 @@ func (s *Server) handleDownloadAttachment(w http.ResponseWriter, r *http.Request
 		writeError(w, err)
 		return
 	}
-	path := s.svc.AttachmentAbsolutePath(item.RelativePath)
+	path, err := s.svc.AttachmentAbsolutePath(item.RelativePath)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
 	w.Header().Set("Content-Type", "application/octet-stream")
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s\"", item.OriginalName))
 	http.ServeFile(w, r, path)
@@ -1379,7 +1400,10 @@ func fallbackContentType(mimeType, ext string) string {
 }
 
 func (s *Server) svcTokenTTL() time.Duration {
-	return 2 * time.Hour
+	if s == nil || s.svc == nil {
+		return 0
+	}
+	return s.svc.AccessTokenTTL()
 }
 
 func (s *Server) loggingMiddleware(next http.Handler) http.Handler {

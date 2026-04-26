@@ -33,6 +33,14 @@ func New(cfg config.Config, st store.Store, localStorage storage.LocalStorage) *
 	}
 }
 
+func (s *Service) MaxUploadSizeBytes() int64 {
+	return s.cfg.MaxUploadSizeBytes
+}
+
+func (s *Service) AccessTokenTTL() time.Duration {
+	return s.cfg.AccessTokenTTL
+}
+
 func (s *Service) Bootstrap(ctx context.Context) error {
 	passwordHash, err := security.HashPassword(s.cfg.SeedAdminPassword)
 	if err != nil {
@@ -655,6 +663,9 @@ func (s *Service) DeleteAttachment(ctx context.Context, currentUserID, id int64)
 	if err != nil {
 		return err
 	}
+	if _, err := s.storage.AbsolutePath(before.RelativePath); err != nil {
+		return err
+	}
 	if err := s.store.DeleteAttachment(ctx, id); err != nil {
 		return err
 	}
@@ -662,7 +673,7 @@ func (s *Service) DeleteAttachment(ctx context.Context, currentUserID, id int64)
 	return s.audit(ctx, currentUserID, "attachment", id, "delete", "删除附件 "+before.Title, before, nil)
 }
 
-func (s *Service) AttachmentAbsolutePath(relativePath string) string {
+func (s *Service) AttachmentAbsolutePath(relativePath string) (string, error) {
 	return s.storage.AbsolutePath(relativePath)
 }
 

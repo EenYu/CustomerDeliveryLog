@@ -5,6 +5,8 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"customerdeliverylog/internal/config"
@@ -12,8 +14,8 @@ import (
 	"customerdeliverylog/internal/pkg/storage"
 	"customerdeliverylog/internal/service"
 	storeiface "customerdeliverylog/internal/store"
-	mysqlstore "customerdeliverylog/internal/store/mysql"
 	"customerdeliverylog/internal/store/memory"
+	mysqlstore "customerdeliverylog/internal/store/mysql"
 )
 
 func main() {
@@ -49,11 +51,33 @@ func main() {
 		Addr:              cfg.ListenAddr,
 		Handler:           server.Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      30 * time.Second,
+		IdleTimeout:       120 * time.Second,
 	}
 
 	log.Printf("server listening on %s", cfg.ListenAddr)
 	log.Printf("storage backend: %s", cfg.StorageBackend)
-	if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-		log.Fatalf("listen failed: %v", err)
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- httpServer.ListenAndServe()
+	}()
+
+	select {
+	case err := <-errCh:
+		if err != nil && err != http.ErrServerClosed {
+			log.Fatalf("listen failed: %v", err)
+		}
+	case <-ctx.Done():
+		log.Printf("shutdown signal received")
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := httpServer.Shutdown(shutdownCtx); err != nil {
+			log.Fatalf("shutdown failed: %v", err)
+		}
 	}
 }

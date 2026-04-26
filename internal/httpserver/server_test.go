@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -324,6 +325,52 @@ func TestIssueRecordAcceptsIssueVersionAndDashboardStats(t *testing.T) {
 	}
 }
 
+func TestCreateAttachmentRejectsBodyOverMaxUploadSize(t *testing.T) {
+	cfg := config.Config{
+		TokenSecret:        "secret",
+		AccessTokenTTL:     time.Hour,
+		RefreshTokenTTL:    24 * time.Hour,
+		UploadDir:          filepath.Join(t.TempDir(), "uploads"),
+		SeedAdminUsername:  "admin",
+		SeedAdminPassword:  "Admin@123456",
+		SeedAdminRealName:  "admin",
+		MaxUploadSizeBytes: 512,
+	}
+
+	st := memory.New()
+	svc := service.New(cfg, st, storage.LocalStorage{BaseDir: cfg.UploadDir})
+	if err := svc.Bootstrap(context.Background()); err != nil {
+		t.Fatalf("bootstrap failed: %v", err)
+	}
+	server := New(svc, "")
+
+	loginResp := performJSONRequest(t, server.Handler(), http.MethodPost, "/api/v1/auth/login", "", map[string]any{
+		"username": "admin",
+		"password": "Admin@123456",
+	})
+	accessToken := loginResp["data"].(map[string]any)["access_token"].(string)
+
+	projectResp := performJSONRequest(t, server.Handler(), http.MethodPost, "/api/v1/projects", accessToken, map[string]any{
+		"project_name":        "upload limit project",
+		"customer_name":       "upload limit customer",
+		"project_status":      "online",
+		"implementation_date": "2026-04-25",
+		"current_version":     "V1.0.0",
+		"deploy_mode":         "standalone",
+	})
+	projectID := int64(projectResp["data"].(map[string]any)["id"].(float64))
+
+	body, contentType := multipartAttachmentBody(t, bytes.Repeat([]byte("x"), 1024))
+	resp := performMultipartRequestWithStatus(t, server.Handler(), "/api/v1/projects/"+itoa(projectID)+"/attachments", accessToken, contentType, body, http.StatusRequestEntityTooLarge)
+
+	if got := resp["code"]; got != float64(1) {
+		t.Fatalf("expected error code 1, got %#v", got)
+	}
+	if got := resp["message"]; got != "request body too large" {
+		t.Fatalf("expected size limit error message, got %#v", got)
+	}
+}
+
 func performJSONRequest(t *testing.T, handler http.Handler, method, path, token string, body any) map[string]any {
 	t.Helper()
 	return performJSONRequestWithStatus(t, handler, method, path, token, body, 0)
@@ -354,6 +401,55 @@ func performJSONRequestWithStatus(t *testing.T, handler http.Handler, method, pa
 		}
 	} else if recorder.Code >= 400 {
 		t.Fatalf("unexpected status %d: %s", recorder.Code, recorder.Body.String())
+	}
+
+	var resp map[string]any
+	if err := json.Unmarshal(recorder.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal response failed: %v", err)
+	}
+	return resp
+}
+
+func multipartAttachmentBody(t *testing.T, fileContent []byte) ([]byte, string) {
+	t.Helper()
+
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	fields := map[string]string{
+		"title":        "upload limit attachment",
+		"doc_category": "test",
+	}
+	for key, value := range fields {
+		if err := writer.WriteField(key, value); err != nil {
+			t.Fatalf("write multipart field %s failed: %v", key, err)
+		}
+	}
+	fileWriter, err := writer.CreateFormFile("file", "too-large.txt")
+	if err != nil {
+		t.Fatalf("create multipart file failed: %v", err)
+	}
+	if _, err := fileWriter.Write(fileContent); err != nil {
+		t.Fatalf("write multipart file failed: %v", err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("close multipart writer failed: %v", err)
+	}
+	return body.Bytes(), writer.FormDataContentType()
+}
+
+func performMultipartRequestWithStatus(t *testing.T, handler http.Handler, path, token, contentType string, body []byte, expectedStatus int) map[string]any {
+	t.Helper()
+
+	req := httptest.NewRequest(http.MethodPost, path, bytes.NewReader(body))
+	req.Header.Set("Content-Type", contentType)
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, req)
+
+	if recorder.Code != expectedStatus {
+		t.Fatalf("expected status %d, got %d: %s", expectedStatus, recorder.Code, recorder.Body.String())
 	}
 
 	var resp map[string]any

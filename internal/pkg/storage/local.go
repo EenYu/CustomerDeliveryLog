@@ -3,6 +3,7 @@ package storage
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"mime/multipart"
@@ -11,6 +12,8 @@ import (
 	"strings"
 	"time"
 )
+
+var ErrUnsafePath = errors.New("unsafe storage path")
 
 type SavedFile struct {
 	FileName      string
@@ -68,15 +71,67 @@ func (s LocalStorage) Delete(relativePath string) error {
 	if relativePath == "" {
 		return nil
 	}
-	absolute := filepath.Join(s.BaseDir, filepath.FromSlash(relativePath))
+	absolute, err := s.AbsolutePath(relativePath)
+	if err != nil {
+		return err
+	}
 	if _, err := os.Stat(absolute); err == nil {
 		return os.Remove(absolute)
 	}
 	return nil
 }
 
-func (s LocalStorage) AbsolutePath(relativePath string) string {
-	return filepath.Join(s.BaseDir, filepath.FromSlash(relativePath))
+func (s LocalStorage) AbsolutePath(relativePath string) (string, error) {
+	relativePath = strings.TrimSpace(relativePath)
+	relative := filepath.FromSlash(relativePath)
+	if !filepath.IsLocal(relative) || filepath.VolumeName(relative) != "" || filepath.Clean(relative) != relative {
+		return "", fmt.Errorf("%w: %s", ErrUnsafePath, relativePath)
+	}
+
+	base, err := filepath.Abs(s.BaseDir)
+	if err != nil {
+		return "", err
+	}
+	absolute, err := filepath.Abs(filepath.Join(base, relative))
+	if err != nil {
+		return "", err
+	}
+	if err := ensureWithinBase(base, absolute, relativePath); err != nil {
+		return "", err
+	}
+
+	resolvedBase, err := filepath.EvalSymlinks(base)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return absolute, nil
+		}
+		return "", err
+	}
+	resolvedPath, err := filepath.EvalSymlinks(absolute)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return absolute, nil
+		}
+		return "", err
+	}
+	if err := ensureWithinBase(resolvedBase, resolvedPath, relativePath); err != nil {
+		return "", err
+	}
+	return absolute, nil
+}
+
+func ensureWithinBase(base, path, original string) error {
+	relative, err := filepath.Rel(base, path)
+	if err != nil {
+		return fmt.Errorf("%w: %s", ErrUnsafePath, original)
+	}
+	if relative == "." {
+		return nil
+	}
+	if relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) || filepath.IsAbs(relative) {
+		return fmt.Errorf("%w: %s", ErrUnsafePath, original)
+	}
+	return nil
 }
 
 func randomName() string {
