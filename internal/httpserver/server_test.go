@@ -371,6 +371,59 @@ func TestCreateAttachmentRejectsBodyOverMaxUploadSize(t *testing.T) {
 	}
 }
 
+func TestListAttachmentsCanExcludeDocCategory(t *testing.T) {
+	cfg := config.Config{
+		TokenSecret:       "secret",
+		AccessTokenTTL:    time.Hour,
+		RefreshTokenTTL:   24 * time.Hour,
+		UploadDir:         filepath.Join(t.TempDir(), "uploads"),
+		SeedAdminUsername: "admin",
+		SeedAdminPassword: "Admin@123456",
+		SeedAdminRealName: "admin",
+	}
+
+	st := memory.New()
+	svc := service.New(cfg, st, storage.LocalStorage{BaseDir: cfg.UploadDir})
+	if err := svc.Bootstrap(context.Background()); err != nil {
+		t.Fatalf("bootstrap failed: %v", err)
+	}
+	server := New(svc, "")
+
+	loginResp := performJSONRequest(t, server.Handler(), http.MethodPost, "/api/v1/auth/login", "", map[string]any{
+		"username": "admin",
+		"password": "Admin@123456",
+	})
+	accessToken := loginResp["data"].(map[string]any)["access_token"].(string)
+
+	projectResp := performJSONRequest(t, server.Handler(), http.MethodPost, "/api/v1/projects", accessToken, map[string]any{
+		"project_name":        "attachment filter project",
+		"customer_name":       "attachment filter customer",
+		"project_status":      "online",
+		"implementation_date": "2026-04-25",
+		"current_version":     "V1.0.0",
+		"deploy_mode":         "standalone",
+	})
+	projectID := int64(projectResp["data"].(map[string]any)["id"].(float64))
+
+	normalBody, normalContentType := multipartAttachmentBodyWithDocCategory(t, []byte("manual"), "manual")
+	performMultipartRequestWithStatus(t, server.Handler(), "/api/v1/projects/"+itoa(projectID)+"/attachments", accessToken, normalContentType, normalBody, http.StatusOK)
+	screenshotBody, screenshotContentType := multipartAttachmentBodyWithDocCategory(t, []byte("screenshot"), "screenshot")
+	performMultipartRequestWithStatus(t, server.Handler(), "/api/v1/projects/"+itoa(projectID)+"/attachments", accessToken, screenshotContentType, screenshotBody, http.StatusOK)
+
+	resp := performJSONRequest(t, server.Handler(), http.MethodGet, "/api/v1/projects/"+itoa(projectID)+"/attachments?exclude_doc_category=screenshot&page=1&page_size=20", accessToken, nil)
+	data := resp["data"].(map[string]any)
+	list := data["list"].([]any)
+	if len(list) != 1 {
+		t.Fatalf("expected one non-screenshot attachment, got %d", len(list))
+	}
+	if got := list[0].(map[string]any)["doc_category"]; got != "manual" {
+		t.Fatalf("expected manual attachment, got %#v", got)
+	}
+	if got := data["total"]; got != float64(1) {
+		t.Fatalf("expected total 1, got %#v", got)
+	}
+}
+
 func performJSONRequest(t *testing.T, handler http.Handler, method, path, token string, body any) map[string]any {
 	t.Helper()
 	return performJSONRequestWithStatus(t, handler, method, path, token, body, 0)
@@ -412,12 +465,17 @@ func performJSONRequestWithStatus(t *testing.T, handler http.Handler, method, pa
 
 func multipartAttachmentBody(t *testing.T, fileContent []byte) ([]byte, string) {
 	t.Helper()
+	return multipartAttachmentBodyWithDocCategory(t, fileContent, "test")
+}
+
+func multipartAttachmentBodyWithDocCategory(t *testing.T, fileContent []byte, docCategory string) ([]byte, string) {
+	t.Helper()
 
 	var body bytes.Buffer
 	writer := multipart.NewWriter(&body)
 	fields := map[string]string{
 		"title":        "upload limit attachment",
-		"doc_category": "test",
+		"doc_category": docCategory,
 	}
 	for key, value := range fields {
 		if err := writer.WriteField(key, value); err != nil {

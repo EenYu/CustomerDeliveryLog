@@ -1020,11 +1020,12 @@ func (s *Server) handleListAttachments(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	filter := model.AttachmentFilter{
-		RefType:     queryString(r, "ref_type"),
-		RefID:       queryInt64(r, "ref_id", 0),
-		DocCategory: queryString(r, "doc_category"),
-		Page:        queryInt(r, "page", 1),
-		PageSize:    queryInt(r, "page_size", 20),
+		RefType:            queryString(r, "ref_type"),
+		RefID:              queryInt64(r, "ref_id", 0),
+		DocCategory:        queryString(r, "doc_category"),
+		ExcludeDocCategory: queryString(r, "exclude_doc_category"),
+		Page:               queryInt(r, "page", 1),
+		PageSize:           queryInt(r, "page_size", 20),
 	}
 	data, err := s.svc.ListAttachments(r.Context(), projectID, filter)
 	if err != nil {

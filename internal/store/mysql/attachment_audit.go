@@ -25,6 +25,10 @@ func (s *MySQLStore) ListAttachments(ctx context.Context, projectID int64, filte
 		clauses = append(clauses, "a.doc_category = ?")
 		args = append(args, filter.DocCategory)
 	}
+	if filter.ExcludeDocCategory != "" {
+		clauses = append(clauses, "a.doc_category <> ?")
+		args = append(args, filter.ExcludeDocCategory)
+	}
 	where := "WHERE " + stringsJoinAnd(clauses)
 	total, err := queryCount(ctx, s.db, "SELECT COUNT(1) FROM project_attachment a "+where, args...)
 	if err != nil {

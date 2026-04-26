@@ -862,6 +862,9 @@ func (s *MemoryStore) ListAttachments(_ context.Context, projectID int64, filter
 		if filter.DocCategory != "" && item.DocCategory != filter.DocCategory {
 			continue
 		}
+		if filter.ExcludeDocCategory != "" && item.DocCategory == filter.ExcludeDocCategory {
+			continue
+		}
 		list = append(list, item)
 	}
 	sort.Slice(list, func(i, j int) bool {

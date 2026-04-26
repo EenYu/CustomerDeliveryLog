@@ -254,11 +254,12 @@ type IssueFilter struct {
 }
 
 type AttachmentFilter struct {
-	RefType     string
-	RefID       int64
-	DocCategory string
-	Page        int
-	PageSize    int
+	RefType            string
+	RefID              int64
+	DocCategory        string
+	ExcludeDocCategory string
+	Page               int
+	PageSize           int
 }
 
 type PagedResult[T any] struct {

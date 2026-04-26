@@ -262,7 +262,7 @@
       this.state.records.serviceRecords = res.list;
     }
     if (this.state.projectTab === 'attachments') {
-      const res = await this.api(`/projects/${projectId}/attachments?page=1&page_size=100`);
+      const res = await this.api(`/projects/${projectId}/attachments?exclude_doc_category=screenshot&page=1&page_size=100`);
       this.state.records.attachments = res.list;
     }
     if (this.state.projectTab === 'audit') {
@@ -1151,7 +1151,6 @@
         <div class="stat-card"><span class="muted">${escapeHtml(d.selected_month || this.state.dashboardFilter.month)} 升级次数</span><strong>${d.monthly_upgrade_num || 0}</strong></div>
         <div class="stat-card"><span class="muted">${escapeHtml(d.selected_month || this.state.dashboardFilter.month)} 服务记录</span><strong>${d.monthly_service_num || 0}</strong></div>
         <div class="stat-card"><span class="muted">${escapeHtml(d.selected_month || this.state.dashboardFilter.month)} 问题记录</span><strong>${d.monthly_issue_num || 0}</strong></div>
-        <div class="stat-card"><span class="muted">待补资料项目</span><strong>${d.missing_document_num || 0}</strong></div>
       </div>
       <div class="detail-grid">
         <div class="overview-card">
@@ -1792,7 +1791,7 @@
     }
     if (field.type === 'textarea') {
       const isRemarkField = field.name === 'remark_text';
-      const textareaPlaceholder = field.placeholder || (isRemarkField ? '支持直接粘贴截图，保存后自动归档到附件中' : '');
+      const textareaPlaceholder = field.placeholder || (isRemarkField ? '支持直接粘贴截图，保存后仅随备注显示' : '');
       return `<div class="field"><label class="${classes}">${escapeHtml(field.label)}</label><textarea name="${field.name}" ${field.required ? 'required' : ''} ${textareaPlaceholder ? `placeholder="${escapeAttr(textareaPlaceholder)}"` : ''} oninput="App.updateModalDraft('${field.name}', this.value)" ${isRemarkField ? 'onpaste="App.handleRemarkPaste(event)"' : ''}>${escapeHtml(value)}</textarea>${isRemarkField ? this.renderRemarkScreenshotPanel() : ''}</div>`;
     }
     if (field.type === 'select') {
@@ -1824,8 +1823,8 @@
     const pasted = modal.pastedImages || [];
     const token = encodeURIComponent(this.state.token || '');
     return `
-        <div class="remark-image-panel">
-          <div class="remark-image-tip">可在备注框中直接按 Ctrl+V 粘贴截图，保存后自动归档到附件中心。</div>
+      <div class="remark-image-panel">
+          <div class="remark-image-tip">可在备注框中直接按 Ctrl+V 粘贴截图，保存后随备注显示，不进入文档资料列表。</div>
         ${modal.loadingScreenshots ? `<div class="muted text-small">正在加载已保存截图...</div>` : ''}
         ${existing.length ? `
           <div class="remark-image-section">
