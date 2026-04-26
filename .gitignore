@@ -1,0 +1,44 @@
+# Local environment files
+.env
+.env.*
+!.env.example
+app.env
+*.local
+
+# Go build/test artifacts
+/dist/
+/customer-delivery-log
+/customer-delivery-log.exe
+*.exe
+*.test
+*.out
+coverage.*
+
+# Local Go caches used by this workspace
+/.gocache/
+/.gomodcache/
+/.gopath/
+
+# Runtime data
+/uploads/
+/logs/
+/run/
+*.log
+*.pid
+
+# Frontend dependencies/build outputs, if added later
+node_modules/
+/web/dist/
+/web/node_modules/
+
+# Python cache files
+__pycache__/
+*.py[cod]
+
+# OS/editor noise
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.tmp
